@@ -129,6 +129,14 @@ p{margin:0}
 .metric span{font-size:11px;color:var(--muted);font-weight:500}
 .metric b{font:700 15px/1.2 var(--f-display);font-variant-numeric:tabular-nums}
 .o-foot{grid-column:1/-1;display:flex;gap:6px;flex-wrap:wrap}
+.o-photo,.d-photo{grid-column:1/-1;position:relative;border-radius:12px;overflow:hidden;background:var(--surface-2);aspect-ratio:16/9;max-width:100%}
+.o-photo{margin:-4px -4px 0}
+.o-photo img,.d-photo img{width:100%;height:100%;object-fit:cover;display:block}
+.ph-missing{display:grid;place-items:center}
+.ph-missing::after{content:"Photo sur l’annonce";color:var(--muted);font-size:13px;font-weight:500}
+.photo-credit{font-size:11px;color:var(--muted);margin-top:-8px}
+.photo-row{display:flex;gap:12px;align-items:center}
+.photo-row img{width:96px;height:64px;object-fit:cover;border-radius:8px;flex:none;background:var(--surface-2)}
 
 .best{background:var(--accent);color:var(--accent-ink);box-shadow:none}
 .best .eyebrow{color:var(--accent-ink);opacity:.8}
@@ -425,6 +433,7 @@ const norm = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLow
 const uid = () => 'o' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
 const safeUrl = u => /^https:\/\//i.test(String(u || '').trim()) ? String(u).trim() : '';
+const safePhoto = u => { const s = String(u || '').trim(); return /^https:\/\//i.test(s) || /^\/_blob\/[A-Za-z0-9_-]+/.test(s) ? s : ''; };
 function duree(y) {
   if (y == null) return 'Pas avant 30 ans';
   if (y < 1 / 24) return 'Immédiat';
@@ -452,11 +461,26 @@ function findCity(o, M) {
   if (!n) return null;
   return list.find(v => norm(v.nom) === n || v.id === n.replace(/ /g, '-')) || null;
 }
-function estimateRent(surface, city, meuble) {
+function estimateRent(surface, city, meuble, type) {
   if (!(surface > 0)) return 0;
-  const base = city ? city.loyerM2 : 13;
-  const f = surface < 25 ? 1.18 : surface < 40 ? 1.08 : surface > 90 ? 0.88 : surface > 65 ? 0.94 : 1;
-  return Math.round(surface * base * f * (meuble ? 1.12 : 1) / 5) * 5;
+  const base = city ? city.loyerM2 : 11;
+  const f = surface < 25 ? 1.18 : surface < 40 ? 1.08 : surface > 150 ? 0.78 : surface > 90 ? 0.88 : surface > 65 ? 0.94 : 1;
+  return Math.round(surface * base * f * (meuble ? 1.12 : 1) * (type === 'maison' ? 0.9 : 1) / 5) * 5;
+}
+// Budget de travaux estimé quand l'annonce n'en donne pas : état annoncé, DPE F ou G, toiture, assainissement.
+function estimateWorks(o) {
+  const s = o.surface || 0;
+  if (!s) return 0;
+  const txt = norm([o.titre, o.notes].concat(o.defauts || []).join(' '));
+  let perM2 = 0;
+  if (/renover entierement|entierement a renover|renovation complete|a rehabiliter|tout a refaire|gros travaux/.test(txt)) perM2 = 700;
+  else if (/a renover|travaux a prevoir|renovation a prevoir|necessite une renovation/.test(txt)) perM2 = 350;
+  else if (/a rafraichir|rafraichissement/.test(txt)) perM2 = 150;
+  if (o.dpe === 'G') perM2 = Math.max(perM2, 450); else if (o.dpe === 'F') perM2 = Math.max(perM2, 300);
+  let total = perM2 * s;
+  if (/toiture a refaire|refaire la toiture|toiture a revoir|toiture a reprendre/.test(txt)) total += s * 120;
+  if (/fosse septique|assainissement non conforme|non raccorde/.test(txt)) total += 10000;
+  return Math.round(total / 500) * 500;
 }
 function normalize(raw, city) {
   const o = Object.assign({}, raw);
@@ -468,7 +492,7 @@ function normalize(raw, city) {
   o.notes = typeof raw.notes === 'string' ? raw.notes : '';
   const est = [];
   const loyer = num(raw.loyer);
-  if (loyer > 0) o.loyer = loyer; else { o.loyer = estimateRent(o.surface, city, o.meuble); est.push('loyer'); }
+  if (loyer > 0) o.loyer = loyer; else { o.loyer = estimateRent(o.surface, city, o.meuble, o.type); est.push('loyer'); }
   const ch = num(raw.charges);
   if (ch != null) o.charges = ch; else if (o.type === 'maison') o.charges = 0; else { o.charges = Math.round(o.surface * 28 / 10) * 10; est.push('charges'); }
   const tf = num(raw.taxeFonciere);
@@ -477,6 +501,7 @@ function normalize(raw, city) {
   o.mobilier = num(raw.mobilier);
   o.annee = num(raw.annee);
   o.dpe = /^[A-G]$/.test(raw.dpe || '') ? raw.dpe : null;
+  if (!(num(raw.travaux) > 0)) { const t = estimateWorks(o); if (t > 0) { o.travaux = t; est.push('travaux'); } }
   o.estimes = est;
   return o;
 }
@@ -610,7 +635,7 @@ function analyze(raw, S, M) {
   r.o = o; r.city = city;
   r.prixM2 = o.surface > 0 ? o.prix / o.surface : null;
   r.ecartMarche = city && r.prixM2 ? r.prixM2 / city.prixM2 - 1 : null;
-  r.loyerMarche = estimateRent(o.surface, city, o.meuble);
+  r.loyerMarche = estimateRent(o.surface, city, o.meuble, o.type);
   r.endettement = S.revenus > 0 ? (r.mensualite + r.assuranceM + (S.autresCredits || 0)) / (S.revenus + 0.7 * o.loyer) : null;
   r.risks = buildRisks(o, r, city, S);
   r.defauts = detectDefects(o);
@@ -764,6 +789,7 @@ async function connect() {
   }
   if (!owner) { goLocal(); d.doc('config/marche').onSnapshot(onMarket, () => {}); return; }
   db = d; state.mode = 'db'; render();
+  C.use('assets').then(a => { state.assetsApi = a || null; if (a && state.route.view === 'analyser') render(); }).catch(() => {});
   const timer = setTimeout(() => { if (!state.loaded) { state.syncNote = 'La connexion est lente : les données affichées peuvent dater.'; render(); } }, 10000);
   db.collection('offers').onSnapshot(snap => {
     state.offers = snap.docs.map(x => Object.assign({}, x.data(), {id: x.id}));
@@ -822,7 +848,9 @@ function matchesCriteria(r) {
 function offerCard(r) {
   const o = r.o;
   const ecart = r.ecartMarche != null ? `<span class="${r.ecartMarche <= 0 ? 'good-t' : 'bad-t'}">${sPct(r.ecartMarche)} vs marché</span>` : '';
+  const photo = safePhoto(o.photo);
   return `<a class="card offer" href="#o-${esc(o.id)}">
+    ${photo ? `<div class="o-photo"><img class="ph" src="${esc(photo)}" alt="${esc(o.titre || 'Photo du bien')}" loading="lazy" referrerpolicy="no-referrer"></div>` : ''}
     <div class="o-main">
       <div class="o-meta">${dpeBadge(o.dpe)}<span>${esc(cityName(r))}</span>${isNew(o) ? '<span class="pill good">Nouveau</span>' : ''}${o.exemple ? '<span class="pill muted">Exemple</span>' : ''}${matchesCriteria(r) && !o.exemple ? '<span class="pill accent">Tes critères</span>' : ''}</div>
       <h3>${esc(o.titre || 'Offre sans titre')}</h3>
@@ -945,6 +973,7 @@ function viewDetail(id) {
   const estimes = o.estimes.length ? `<div class="note info">Valeurs estimées faute d’information : ${esc(o.estimes.join(', '))}. Modifie l’offre pour mettre les vrais chiffres.</div>` : '';
   return `
     <a class="back" href="#offres">‹ Offres</a>
+    ${safePhoto(raw.photo) ? `<div class="d-photo"><img class="ph" src="${esc(safePhoto(raw.photo))}" alt="${esc(o.titre || 'Photo du bien')}" referrerpolicy="no-referrer"></div>${raw.photoCredit ? `<p class="photo-credit">${esc(raw.photoCredit)}</p>` : ''}` : ''}
     <header class="d-head">
       <div style="display:flex;flex-direction:column;gap:6px;min-width:0">
         <div class="o-meta">${dpeBadge(o.dpe)}<span>${esc(cityName(r))}</span>${o.exemple ? '<span class="pill muted">Exemple</span>' : ''}</div>
@@ -999,7 +1028,7 @@ function viewDetail(id) {
       <div class="facts">
         <div><span>Prix</span><b>${eur(o.prix)}</b></div>
         <div><span>Frais de notaire</span><b>${eur(r.notaire)}</b></div>
-        ${r.travaux ? `<div><span>Travaux</span><b>${eur(r.travaux)}</b></div>` : ''}
+        ${r.travaux ? `<div><span>Travaux${o.estimes.includes('travaux') ? ' (estimés par HomeIme)' : ''}</span><b>${eur(r.travaux)}</b></div>` : ''}
         ${r.mobilier ? `<div><span>Mobilier</span><b>${eur(r.mobilier)}</b></div>` : ''}
         ${r.fraisBancaires ? `<div><span>Frais de dossier et garantie</span><b>${eur(r.fraisBancaires)}</b></div>` : ''}
         <div class="total"><span>Coût total</span><b>${eur(r.coutProjet)}</b></div>
@@ -1038,7 +1067,7 @@ function viewDetail(id) {
 }
 
 /* --- Formulaire --- */
-const EMPTY_DRAFT = {type: '', titre: '', ville: '', villeNom: '', region: '', prix: '', surface: '', pieces: '', dpe: '', meuble: false, loyer: '', charges: '', taxeFonciere: '', travaux: '', annee: '', lien: '', defauts: '', notes: ''};
+const EMPTY_DRAFT = {photo: '', photoCredit: '', type: '', titre: '', ville: '', villeNom: '', region: '', prix: '', surface: '', pieces: '', dpe: '', meuble: false, loyer: '', charges: '', taxeFonciere: '', travaux: '', annee: '', lien: '', defauts: '', notes: ''};
 function draftFromOffer(o) {
   const d = Object.assign({}, EMPTY_DRAFT);
   for (const k of Object.keys(EMPTY_DRAFT)) if (o[k] != null) d[k] = typeof EMPTY_DRAFT[k] === 'boolean' ? !!o[k] : Array.isArray(o[k]) ? o[k].join('\n') : String(o[k]);
@@ -1046,6 +1075,7 @@ function draftFromOffer(o) {
   if (!d.ville && o.villeNom) { const c = findCity(o, state.market); d.ville = c ? c.id : 'autre'; }
   return d;
 }
+const photoPreviewHTML = d => safePhoto(d.photo) ? `<img class="ph" src="${esc(safePhoto(d.photo))}" alt="Photo du bien" referrerpolicy="no-referrer"><button type="button" class="inline-btn" data-action="remove-photo">Retirer la photo</button>` : '';
 const splitLines = s => String(s || '').split(/\n|;/).map(x => x.trim()).filter(Boolean).slice(0, 12).map(x => x.slice(0, 120));
 function ensureDraft() {
   if (!state.draft) {
@@ -1076,7 +1106,7 @@ function previewHTML() {
 function rentHint() {
   const d = ensureDraft();
   const city = findCity(draftOffer(d), state.market);
-  const est = estimateRent(num(d.surface) || 0, city, d.meuble);
+  const est = estimateRent(num(d.surface) || 0, city, d.meuble, TYPES[d.type] ? d.type : inferType(d.titre));
   if (!est) return 'Laisse vide pour utiliser une estimation du marché.';
   return `Estimation du marché : <b>${eur(est)}</b> hors charges. <button type="button" class="inline-btn" data-action="use-rent" data-v="${est}">Utiliser</button>`;
 }
@@ -1123,6 +1153,12 @@ function viewAnalyser() {
       <div class="grid2">${f('charges', 'Charges de copro / an (€)', {num: 1, ph: 'Ex. 1 200'})}${f('taxeFonciere', 'Taxe foncière / an (€)', {num: 1, ph: 'Ex. 800'})}</div>
       <div class="grid2">${f('travaux', 'Travaux (€)', {num: 1, ph: '0'})}${f('annee', 'Année de construction', {num: 1, ph: 'Ex. 1975'})}</div>
       ${f('lien', 'Lien de l’annonce', {type: 'url', ph: 'https://…'})}
+      <div class="field"><label for="f-photo">Photo</label>
+        <div class="photo-row" id="photo-row">${photoPreviewHTML(d)}</div>
+        <input id="f-photo" name="photo" type="url" value="${esc(d.photo)}" placeholder="Lien https d’une photo (facultatif)" autocomplete="off">
+        ${state.assetsApi ? `<label class="btn ghost small" for="f-photo-file">Ajouter une photo depuis mon téléphone</label><input id="f-photo-file" class="sr" type="file" accept="image/jpeg,image/png,image/webp">` : ''}
+        <span class="hint" id="photo-status">${state.assetsApi ? 'Prends une photo en visite ou choisis-en une dans ta galerie.' : 'Colle le lien d’une photo de l’annonce si tu en as un.'}</span>
+      </div>
       <div class="field"><label for="f-defauts">Défauts connus (un par ligne)</label><textarea id="f-defauts" name="defauts" rows="3" placeholder="Toiture à refaire&#10;Humidité au sous-sol&#10;Fosse septique non conforme">${esc(d.defauts)}</textarea><span class="hint">Ce que dit l’annonce ou ce que tu as vu en visite. HomeIme explique chaque défaut et son coût habituel.</span></div>
       <div class="field"><label for="f-notes">Notes</label><textarea id="f-notes" name="notes" rows="3" placeholder="Étage, exposition, impressions de visite…">${esc(d.notes)}</textarea></div>
     </form>
@@ -1425,6 +1461,11 @@ document.addEventListener('click', async e => {
     for (const o of ex) await removeOffer(o.id);
     state.confirm = null; toast('Exemples retirés'); render({force: true});
   }
+  else if (a === 'remove-photo') {
+    const d = ensureDraft(); d.photo = ''; d.photoCredit = ''; persistDraft();
+    const row = $('#photo-row'); if (row) row.innerHTML = '';
+    const input = $('#f-photo'); if (input) input.value = '';
+  }
   else if (a === 'load-examples') {
     const now = new Date().toISOString();
     LOCAL_EXAMPLES.forEach(x => { if (!state.offers.some(o => o.id === x.id)) state.offers.push(Object.assign({}, x, {exemple: true, checks: [], source: 'exemple', lien: '', createdAt: now})); });
@@ -1458,6 +1499,7 @@ document.addEventListener('click', async e => {
       loyer: num(d.loyer), charges: num(d.charges), taxeFonciere: num(d.taxeFonciere), travaux: num(d.travaux), annee: num(d.annee),
       lien: safeUrl(d.lien), notes: (d.notes || '').slice(0, 4000),
       type: TYPES[d.type] ? d.type : inferType(d.titre), defauts: splitLines(d.defauts),
+      photo: safePhoto(d.photo), photoCredit: safePhoto(d.photo) ? String(d.photoCredit || '').slice(0, 120) : '',
       checks: prevO && prevO.checks ? prevO.checks : [], exemple: false,
       source: prevO && prevO.source ? prevO.source : 'manuel',
       createdAt: prevO && prevO.createdAt ? prevO.createdAt : new Date().toISOString()
@@ -1490,6 +1532,23 @@ document.addEventListener('change', async e => {
     else { o.checks = checks; lsWrite(); }
     return;
   }
+  if (t.id === 'f-photo-file') {
+    const file = t.files && t.files[0];
+    const status = $('#photo-status');
+    if (!file || !state.assetsApi) return;
+    if (file.size > 15 * 1024 * 1024) { if (status) status.textContent = 'Photo trop lourde (15 Mo maximum).'; return; }
+    if (status) status.textContent = 'Envoi de la photo…';
+    try {
+      const res = await state.assetsApi.upload(file);
+      const d = ensureDraft(); d.photo = res.url; d.photoCredit = 'Photo ajoutée par toi'; persistDraft();
+      const row = $('#photo-row'); if (row) row.innerHTML = photoPreviewHTML(d);
+      const input = $('#f-photo'); if (input) input.value = res.url;
+      if (status) status.textContent = 'Photo ajoutée. Pense à enregistrer l’offre.';
+    } catch (err) {
+      if (status) status.textContent = 'Impossible d’envoyer la photo pour le moment. Réessaie.';
+    }
+    return;
+  }
   if (t.id === 'imp-img') {
     state.importFile = t.files && t.files[0] ? t.files[0] : null;
     const lab = document.querySelector('label[for="imp-img"]'); if (lab) lab.textContent = state.importFile ? 'Capture ajoutée ✓' : 'Ajouter une capture';
@@ -1511,6 +1570,7 @@ function onFormInput(e) {
   persistDraft();
   const p = $('#preview'); if (p) p.innerHTML = previewHTML();
   if (['ville', 'villeNom', 'surface', 'meuble'].includes(t.name)) { const h = $('#rent-hint'); if (h) h.innerHTML = rentHint(); }
+  if (t.name === 'photo') { d.photoCredit = ''; const row = $('#photo-row'); if (row) row.innerHTML = photoPreviewHTML(d); }
 }
 function onSettingInput(e, committed) {
   const t = e.target;
@@ -1526,6 +1586,14 @@ function onSettingInput(e, committed) {
   queueSave(obj);
   if (obj === 'criteria' && state.route.view === 'rechercher') updateSearch();
 }
+document.addEventListener('error', e => {
+  const t = e.target;
+  if (t && t.tagName === 'IMG' && t.classList.contains('ph')) {
+    const box = t.parentElement;
+    if (box && (box.classList.contains('o-photo') || box.classList.contains('d-photo'))) { box.classList.add('ph-missing'); t.remove(); }
+    else t.style.visibility = 'hidden';
+  }
+}, true);
 document.addEventListener('toggle', e => { if (e.target.classList && e.target.classList.contains('zone')) state.zoneOpen = e.target.open; }, true);
 
 window.addEventListener('hashchange', () => { route(); render({force: true}); window.scrollTo(0, 0); });
