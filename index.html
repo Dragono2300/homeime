@@ -226,7 +226,15 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);
 
 /* Tab bar */
 .tabbar{position:fixed;left:0;right:0;bottom:0;z-index:20;background:var(--surface);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom,0px);padding-left:max(8px,env(safe-area-inset-left,0px));padding-right:max(8px,env(safe-area-inset-right,0px))}
-.tabbar-in{max-width:560px;margin:0 auto;display:grid;grid-template-columns:repeat(4,1fr)}
+.tabbar-in{max-width:560px;margin:0 auto;display:grid;grid-template-columns:repeat(5,1fr)}
+.seg.seg3{grid-template-columns:repeat(3,1fr)}
+.zone{display:flex;flex-direction:column;gap:12px}
+.zone summary{display:flex;align-items:center;justify-content:space-between;gap:12px;cursor:pointer;list-style:none;padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--surface-2)}
+.zone summary::-webkit-details-marker{display:none}
+.zone summary b{font-weight:600;text-align:right;min-width:0;overflow-wrap:anywhere}
+.zone summary b::after{content:" ▾";color:var(--muted)}
+.zone[open] summary b::after{content:" ▴"}
+.zone[open] > .field{margin-top:12px}
 .tab{display:flex;flex-direction:column;align-items:center;gap:3px;padding:9px 4px 7px;color:var(--muted);text-decoration:none;font:500 11px/1 var(--f-body)}
 .tab svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 .tab[aria-current="page"]{color:var(--accent)}
@@ -248,6 +256,7 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);
 <nav class="tabbar" aria-label="Navigation">
   <div class="tabbar-in">
     <a class="tab" href="#offres" data-tab="offres"><svg viewBox="0 0 24 24"><path d="M3.5 10.5 12 3.5l8.5 7V20a1 1 0 0 1-1 1H15v-6H9v6H4.5a1 1 0 0 1-1-1z"/></svg>Offres</a>
+    <a class="tab" href="#rechercher" data-tab="rechercher"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/></svg>Rechercher</a>
     <a class="tab" href="#analyser" data-tab="analyser"><svg viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="2.5"/><path d="M8.5 7.5h7M8.5 12h1M12 12h1M15.5 12h0M8.5 16h1M12 16h1M15.5 15v2"/></svg>Analyser</a>
     <a class="tab" href="#marche" data-tab="marche"><svg viewBox="0 0 24 24"><path d="M4 20h16M6.5 16v-4M11 16V7M15.5 16v-6M20 4l-4.5 4-4.5-3-4.5 4"/></svg>Marché</a>
     <a class="tab" href="#reglages" data-tab="reglages"><svg viewBox="0 0 24 24"><path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/></svg>Réglages</a>
@@ -269,7 +278,55 @@ const DEFAULT_SETTINGS = {
   irl: 1.5, inflation: 2, appreciation: 1, fraisNotaire: 7.5, fraisVente: 5,
   revenus: 0, autresCredits: 0
 };
-const DEFAULT_CRITERIA = { regions: [], villes: [], budgetMax: 200000, rendementMin: 6 };
+const DEFAULT_CRITERIA = { typeBien: 'tous', regions: [], villes: [], budgetMax: 200000, surfaceMin: 0, rendementMin: 6 };
+
+const TYPES = {appartement: 'Appartement', maison: 'Maison', immeuble: 'Immeuble'};
+const inferType = titre => /maison|villa|pavillon|long[eè]re|corps de ferme|fermette|chalet/i.test(titre || '') ? 'maison' : /immeuble/i.test(titre || '') ? 'immeuble' : 'appartement';
+const CHECKS_MAISON = [
+  ['spanc', 'Vérifier l’assainissement : tout-à-l’égout, ou contrôle SPANC de moins de 3 ans'],
+  ['toiture', 'Faire inspecter la toiture, la charpente et les gouttières'],
+  ['termites', 'Lire le diagnostic termites et vérifier l’absence de mérule'],
+  ['terrain', 'Vérifier les limites du terrain, les servitudes et le PLU (cadastre, bornage)'],
+  ['chauffage', 'Regarder le mode de chauffage, l’isolation et l’âge de la chaudière']
+];
+// Défauts reconnus dans le texte de l'annonce, les défauts saisis ou les notes.
+const DEFECT_RULES = [
+  [/merule/, 'critique', 'Mérule', 'Champignon qui détruit le bois : traitement lourd, souvent plus de 10 000 €. À éviter sauf prix très bas.'],
+  [/fissure|lezarde|affaissement|tassement/, 'critique', 'Fissures', 'Peut venir du retrait-gonflement des argiles ou de fondations faibles. Fais venir un expert structure avant toute offre.'],
+  [/inondable|inondation|crue/, 'critique', 'Zone inondable', 'Assurance plus chère, revente plus difficile et risque de dégâts. Vérifie le plan de prévention des risques sur Géorisques.'],
+  [/copropriete en difficulte|procedure|impayes|administrateur judiciaire/, 'critique', 'Copropriété en difficulté', 'Charges qui explosent et travaux bloqués. Lis les procès-verbaux d’assemblée avant d’aller plus loin.'],
+  [/toiture|couverture|charpente|tuiles/, 'attention', 'Toiture ou charpente', 'Une réfection de toiture coûte souvent 150 à 300 € par m² de toit. Fais-la inspecter par un couvreur.'],
+  [/humidite|infiltration|salpetre|moisissure|condensation|remontees capillaires/, 'attention', 'Humidité', 'Trouve la cause (fuite, remontées capillaires, ventilation). Traitement : 3 000 à 15 000 € selon l’ampleur.'],
+  [/fosse septique|assainissement individuel|assainissement non conforme|non raccorde|spanc|micro station/, 'attention', 'Assainissement individuel', 'Un contrôle SPANC de moins de 3 ans est obligatoire à la vente. Mise aux normes : 6 000 à 15 000 €.'],
+  [/termite/, 'attention', 'Termites', 'Le diagnostic termites est obligatoire en zone concernée. Vérifie qu’un traitement a été fait et garanti.'],
+  [/amiante/, 'attention', 'Amiante', 'Le désamiantage coûte cher et doit être fait par une entreprise certifiée. Lis le diagnostic en détail.'],
+  [/\bplomb\b/, 'attention', 'Plomb', 'Peintures au plomb à recouvrir ou retirer avant de louer, surtout avec des enfants.'],
+  [/electricite a refaire|installation electrique|tableau electrique|mise aux normes electrique/, 'attention', 'Électricité à refaire', 'Mise aux normes : environ 80 à 150 € par m².'],
+  [/fioul|fuel/, 'attention', 'Chauffage au fioul', 'Les chaudières au fioul neuves sont interdites depuis 2022 : prévois une pompe à chaleur (10 000 à 18 000 €).'],
+  [/mal isole|isolation a revoir|sans isolation|passoire|pas isole/, 'attention', 'Isolation faible', 'Factures élevées et risque de mauvais DPE : prévois l’isolation des combles et des murs.'],
+  [/simple vitrage/, 'info', 'Simple vitrage', 'Fenêtres à changer : environ 600 à 1 200 € par fenêtre.'],
+  [/travaux|a renover|a rafraichir|a rehabiliter|a restaurer/, 'info', 'Travaux annoncés', 'Fais chiffrer précisément par deux artisans : les budgets dérapent souvent de 20 à 30 %.'],
+  [/bruit|nuisance|voie ferree|route passante|aeroport/, 'info', 'Nuisances', 'Le bruit fait fuir les locataires : visite aux heures de pointe.']
+];
+function detectDefects(o) {
+  const found = [], seen = new Set();
+  const push = (niveau, titre, texte, source) => { if (!seen.has(titre)) { seen.add(titre); found.push({niveau, titre, texte, source}); } };
+  for (const d of o.defauts) {
+    const n = norm(d);
+    const rule = DEFECT_RULES.find(([re]) => re.test(n));
+    if (rule) push(rule[1], rule[2], rule[3], d); else push('attention', d.charAt(0).toUpperCase() + d.slice(1), 'Signalé dans l’annonce : fais-le chiffrer avant de faire une offre.', d);
+  }
+  const text = norm([o.titre, o.notes].join(' '));
+  for (const [re, niveau, titre, texte] of DEFECT_RULES) {
+    const m = re.exec(text);
+    if (!m) continue;
+    const before = text.slice(Math.max(0, m.index - 22), m.index);
+    if (/\b(pas de|sans|aucun|aucune|absence de|ni)\s*$/.test(before)) continue;
+    push(niveau, titre, texte, null);
+  }
+  const order = {critique: 0, attention: 1, info: 2};
+  return found.sort((a, b) => order[a.niveau] - order[b.niveau]);
+}
 
 const REGIONS = [
   {id:'auvergne-rhone-alpes', nom:'Auvergne-Rhône-Alpes'},
@@ -335,6 +392,7 @@ const MARKET_DEFAULT = {
 const LOCAL_EXAMPLES = [
   {id:'ex-saint-etienne-t2', titre:'T2 rénové près de Châteaucreux', ville:'saint-etienne', villeNom:'Saint-Étienne', region:'auvergne-rhone-alpes', prix:79000, surface:48, pieces:2, dpe:'D', meuble:false, loyer:480, charges:960, taxeFonciere:650, travaux:0, annee:1965, notes:'Exemple fictif pour découvrir HomeIme.'},
   {id:'ex-mulhouse-t3', titre:'T3 vendu loué, Rebberg', ville:'mulhouse', villeNom:'Mulhouse', region:'grand-est', prix:95000, surface:68, pieces:3, dpe:'D', meuble:false, loyer:650, charges:1500, taxeFonciere:900, travaux:0, annee:1970, notes:'Exemple fictif pour découvrir HomeIme.'},
+  {id:'ex-saint-etienne-maison', type:'maison', titre:'Maison mitoyenne 4 pièces avec jardin', ville:'saint-etienne', villeNom:'Saint-Étienne', region:'auvergne-rhone-alpes', prix:98000, surface:90, pieces:4, dpe:'E', meuble:false, loyer:750, charges:0, taxeFonciere:1100, travaux:0, annee:1950, defauts:['toiture à refaire', 'fosse septique non conforme'], notes:'Exemple fictif pour découvrir HomeIme.'},
   {id:'ex-lille-studio', titre:'Studio meublé à Wazemmes', ville:'lille', villeNom:'Lille', region:'hauts-de-france', prix:129000, surface:22, pieces:1, dpe:'E', meuble:true, loyer:590, charges:720, taxeFonciere:520, travaux:0, annee:1930, notes:'Exemple fictif pour découvrir HomeIme.'}
 ];
 const TENSION = {tres_forte:'Très tendu', forte:'Tendu', moyenne:'Modéré', faible:'Peu tendu'};
@@ -405,11 +463,14 @@ function normalize(raw, city) {
   o.prix = num(raw.prix) || 0;
   o.surface = num(raw.surface) || 0;
   o.meuble = !!raw.meuble;
+  o.type = TYPES[raw.type] ? raw.type : inferType(raw.titre);
+  o.defauts = Array.isArray(raw.defauts) ? raw.defauts.filter(x => typeof x === 'string' && x.trim()).map(x => x.trim().slice(0, 120)).slice(0, 12) : [];
+  o.notes = typeof raw.notes === 'string' ? raw.notes : '';
   const est = [];
   const loyer = num(raw.loyer);
   if (loyer > 0) o.loyer = loyer; else { o.loyer = estimateRent(o.surface, city, o.meuble); est.push('loyer'); }
   const ch = num(raw.charges);
-  if (ch != null) o.charges = ch; else { o.charges = Math.round(o.surface * 28 / 10) * 10; est.push('charges'); }
+  if (ch != null) o.charges = ch; else if (o.type === 'maison') o.charges = 0; else { o.charges = Math.round(o.surface * 28 / 10) * 10; est.push('charges'); }
   const tf = num(raw.taxeFonciere);
   if (tf != null) o.taxeFonciere = tf; else { o.taxeFonciere = Math.round(o.surface * 14 / 10) * 10; est.push('taxe foncière'); }
   o.travaux = num(raw.travaux) || 0;
@@ -466,8 +527,9 @@ function simulate(o, city, S, regime) {
     sched.push({interets: it, crd: Math.max(0, crd)});
   }
   const loyerAn = o.loyer * 12, vac = clamp(S.vacance / 52, 0, 0.5);
-  const fixes = o.charges * S.partChargesNonRecup / 100 + o.taxeFonciere + Math.round(110 + surf * 1.2) + (o.meuble ? 250 : 0) + (regime === 'lmnp_reel' ? 450 : 0);
-  const varPct = (S.gestion + S.entretien) / 100;
+  const maison = o.type === 'maison';
+  const fixes = o.charges * (maison ? 1 : S.partChargesNonRecup / 100) + o.taxeFonciere + Math.round(110 + surf * (maison ? 1.8 : 1.2)) + (o.meuble ? 250 : 0) + (regime === 'lmnp_reel' ? 450 : 0);
+  const varPct = (S.gestion + S.entretien + (maison ? 3 : 0)) / 100;
   const encY1 = loyerAn * (1 - vac);
   const opexY1 = fixes + encY1 * varPct;
   const tauxImpot = (S.tmi + S.ps) / 100;
@@ -551,6 +613,7 @@ function analyze(raw, S, M) {
   r.loyerMarche = estimateRent(o.surface, city, o.meuble);
   r.endettement = S.revenus > 0 ? (r.mensualite + r.assuranceM + (S.autresCredits || 0)) / (S.revenus + 0.7 * o.loyer) : null;
   r.risks = buildRisks(o, r, city, S);
+  r.defauts = detectDefects(o);
   r.score = scoreOf(r);
   r.atouts = atouts(r);
   return r;
@@ -584,6 +647,10 @@ function buildRisks(o, r, city, S) {
   if (r.regime === 'micro_foncier' && S.tmi >= 30) add('info', 'Fiscalité lourde', `Au micro-foncier avec une tranche à ${S.tmi} %, l'impôt pèse beaucoup. La location meublée (LMNP) réduit souvent l'impôt à zéro pendant des années.`);
   if (r.regime === 'lmnp_reel') add('info', 'Amortissements et revente', "Depuis 2025, les amortissements déduits en LMNP sont ajoutés à la plus-value lors de la revente. HomeIme en tient compte.");
   if (o.meuble) add('info', 'Mobilier', 'Le mobilier est à renouveler tous les 7 à 10 ans, et la liste du mobilier obligatoire doit être respectée.');
+  if (o.type === 'maison') {
+    add('info', 'Maison : tout est à ta charge', `Pas de copropriété pour partager les frais : toiture, façade, réseaux et extérieurs sont pour toi. HomeIme prévoit un entretien plus élevé (${String(S.entretien + 3).replace('.', ',')} % des loyers) et une assurance plus chère.`);
+    add('info', 'Terrain et assainissement', 'Vérifie le raccordement au tout-à-l’égout, le retrait-gonflement des argiles et les risques naturels sur Géorisques.');
+  }
   const order = {critique: 0, attention: 1, info: 2};
   return R.sort((a, b) => order[a.niveau] - order[b.niveau]);
 }
@@ -594,7 +661,8 @@ function scoreOf(r) {
     + lin(r.cashMensuel, -400, 150, 20)
     + (r.ecartMarche == null ? 10 : lin(-r.ecartMarche * 100, -20, 20, 20))
     + (r.rentable == null ? 0 : lin(-r.rentable, -20, -4, 15));
-  const crit = r.risks.filter(x => x.niveau === 'critique').length, att = r.risks.filter(x => x.niveau === 'attention').length;
+  const all = r.risks.concat(r.defauts || []);
+  const crit = all.filter(x => x.niveau === 'critique').length, att = all.filter(x => x.niveau === 'attention').length;
   s += Math.max(0, 15 - crit * 8 - att * 3);
   return Math.round(clamp(s, 0, 100));
 }
@@ -733,11 +801,15 @@ function riskPills(r) {
   let h = '';
   if (c) h += `<span class="pill bad">${c} critique${c > 1 ? 's' : ''}</span>`;
   if (a) h += `<span class="pill warn">${a} à surveiller</span>`;
-  if (!c && !a) h += `<span class="pill good">Pas de risque majeur</span>`;
+  const d = (r.defauts || []).filter(x => x.niveau !== 'info');
+  if (d.length) h += `<span class="pill bad">Défauts : ${esc(d.slice(0, 2).map(x => x.titre.toLowerCase()).join(', '))}${d.length > 2 ? ' +' + (d.length - 2) : ''}</span>`;
+  if (!c && !a && !d.length) h += `<span class="pill good">Pas de risque majeur</span>`;
   return h;
 }
 function matchesCriteria(r) {
   const C = state.criteria, R = C.regions || [], V = C.villes || [];
+  if (C.typeBien && C.typeBien !== 'tous' && r.o.type !== C.typeBien) return false;
+  if (C.surfaceMin && r.o.surface < C.surfaceMin) return false;
   if (R.length || V.length) {
     const reg = r.o.region || cityRegion(r.city);
     const inV = !!(r.city && V.includes(r.city.id)), inR = !!(reg && R.includes(reg));
@@ -754,7 +826,7 @@ function offerCard(r) {
     <div class="o-main">
       <div class="o-meta">${dpeBadge(o.dpe)}<span>${esc(cityName(r))}</span>${isNew(o) ? '<span class="pill good">Nouveau</span>' : ''}${o.exemple ? '<span class="pill muted">Exemple</span>' : ''}${matchesCriteria(r) && !o.exemple ? '<span class="pill accent">Tes critères</span>' : ''}</div>
       <h3>${esc(o.titre || 'Offre sans titre')}</h3>
-      <p class="o-sub num">${eur(o.prix)} · ${nf0.format(o.surface)} m² · ${o.meuble ? 'meublé' : 'nu'} ${ecart ? '· ' + ecart : ''}</p>
+      <p class="o-sub num">${esc(TYPES[o.type])} · ${eur(o.prix)} · ${nf0.format(o.surface)} m² · ${o.meuble ? 'meublé' : 'nu'} ${ecart ? '· ' + ecart : ''}</p>
     </div>
     ${ring(r.score)}
     <div class="metrics">
@@ -781,7 +853,7 @@ function viewOffres() {
       <span class="eyebrow">Aucune offre pour l’instant</span>
       <h2>Ajoute ta première annonce</h2>
       <p>Colle le texte d’une annonce ou entre le prix et la surface : HomeIme calcule les gains, le temps pour être rentable et les risques.</p>
-      <div class="row" style="width:100%"><a class="btn" href="#analyser">Analyser une offre</a>${state.mode === 'local' ? '<button class="btn ghost" data-action="load-examples">Voir 3 exemples</button>' : ''}</div>
+      <div class="row" style="width:100%"><a class="btn" href="#analyser">Analyser une offre</a>${state.mode === 'local' ? '<button class="btn ghost" data-action="load-examples">Voir des exemples</button>' : ''}</div>
     </div>
     ${state.mode === 'db' ? veilleLine() : `<p class="foot">Tes offres et réglages restent enregistrés sur cet appareil.</p>`}`;
   const sorters = {
@@ -878,7 +950,7 @@ function viewDetail(id) {
         <div class="o-meta">${dpeBadge(o.dpe)}<span>${esc(cityName(r))}</span>${o.exemple ? '<span class="pill muted">Exemple</span>' : ''}</div>
         <h1>${esc(o.titre || 'Offre sans titre')}</h1>
         <p class="o-sub num">${eur(o.prix)} · ${nf0.format(o.surface)} m² · ${r.prixM2 ? nf0.format(r.prixM2) + ' €/m²' : ''}${r.ecartMarche != null ? ` <span class="${r.ecartMarche <= 0 ? 'good-t' : 'bad-t'}">(${sPct(r.ecartMarche)} vs marché)</span>` : ''}</p>
-        <p class="o-sub">Location ${o.meuble ? 'meublée' : 'nue'} · ${esc(REGIMES[r.regime])}${r.regimeAuto ? ' (le plus avantageux)' : ''}</p>
+        <p class="o-sub">${esc(TYPES[o.type])} · location ${o.meuble ? 'meublée' : 'nue'} · ${esc(REGIMES[r.regime])}${r.regimeAuto ? ' (le plus avantageux)' : ''}</p>
       </div>
       <div>${ring(r.score, 76, true)}<p class="verdict">${verdict(r.score)}</p></div>
     </header>
@@ -909,6 +981,14 @@ function viewDetail(id) {
       </div>
     </section>
 
+    ${r.defauts.length || o.type === 'maison' ? `<section class="card">
+      <span class="eyebrow">Défauts connus</span>
+      ${r.defauts.length
+        ? `<div class="risks">${r.defauts.map(x => `<div class="risk ${x.niveau}"><i></i><div><b>${esc(x.titre)}</b><p>${esc(x.texte)}${x.source && norm(x.source) !== norm(x.titre) ? ` Annonce : « ${esc(x.source)} ».` : ''}</p></div></div>`).join('')}</div>`
+        : `<p class="lead">Aucun défaut signalé dans l’annonce. Sur une maison, vérifie quand même la toiture, l’humidité, l’assainissement et le chauffage.</p>`}
+      <p class="hint">Repérés dans l’annonce, dans les défauts que tu as notés et dans tes notes. Ajoute-en dans « Modifier ».</p>
+    </section>` : ''}
+
     <section class="card">
       <span class="eyebrow">Problèmes potentiels</span>
       <div class="risks">${r.risks.map(x => `<div class="risk ${x.niveau}"><i></i><div><b>${esc(x.titre)}</b><p>${esc(x.texte)}</p></div></div>`).join('')}</div>
@@ -934,7 +1014,7 @@ function viewDetail(id) {
 
     <section class="card">
       <span class="eyebrow">À vérifier avant d’acheter</span>
-      <div class="checks">${CHECKS.map(([k, l]) => `<label class="check"><input type="checkbox" data-action="check" data-id="${esc(id)}" data-key="${k}" ${(raw.checks || []).includes(k) ? 'checked' : ''}><span>${esc(l)}</span></label>`).join('')}</div>
+      <div class="checks">${(o.type === 'maison' ? CHECKS_MAISON.concat(CHECKS) : CHECKS).map(([k, l]) => `<label class="check"><input type="checkbox" data-action="check" data-id="${esc(id)}" data-key="${k}" ${(raw.checks || []).includes(k) ? 'checked' : ''}><span>${esc(l)}</span></label>`).join('')}</div>
     </section>
 
     ${state.aiAvailable ? `<section class="card">
@@ -958,13 +1038,15 @@ function viewDetail(id) {
 }
 
 /* --- Formulaire --- */
-const EMPTY_DRAFT = {titre: '', ville: '', villeNom: '', region: '', prix: '', surface: '', pieces: '', dpe: '', meuble: false, loyer: '', charges: '', taxeFonciere: '', travaux: '', annee: '', lien: '', notes: ''};
+const EMPTY_DRAFT = {type: '', titre: '', ville: '', villeNom: '', region: '', prix: '', surface: '', pieces: '', dpe: '', meuble: false, loyer: '', charges: '', taxeFonciere: '', travaux: '', annee: '', lien: '', defauts: '', notes: ''};
 function draftFromOffer(o) {
   const d = Object.assign({}, EMPTY_DRAFT);
-  for (const k of Object.keys(EMPTY_DRAFT)) if (o[k] != null) d[k] = typeof EMPTY_DRAFT[k] === 'boolean' ? !!o[k] : String(o[k]);
+  for (const k of Object.keys(EMPTY_DRAFT)) if (o[k] != null) d[k] = typeof EMPTY_DRAFT[k] === 'boolean' ? !!o[k] : Array.isArray(o[k]) ? o[k].join('\n') : String(o[k]);
+  if (!d.type) d.type = inferType(o.titre);
   if (!d.ville && o.villeNom) { const c = findCity(o, state.market); d.ville = c ? c.id : 'autre'; }
   return d;
 }
+const splitLines = s => String(s || '').split(/\n|;/).map(x => x.trim()).filter(Boolean).slice(0, 12).map(x => x.slice(0, 120));
 function ensureDraft() {
   if (!state.draft) {
     let saved = null;
@@ -976,7 +1058,7 @@ function ensureDraft() {
 }
 function persistDraft() { try { sessionStorage.setItem('homeime.draft', JSON.stringify({d: state.draft, id: state.editingId})); } catch (e) {} }
 function draftOffer(d) {
-  return {id: state.editingId || 'draft', titre: d.titre, ville: d.ville && d.ville !== 'autre' ? d.ville : '', villeNom: d.ville === 'autre' ? d.villeNom : '', region: d.ville === 'autre' ? d.region : '',
+  return {id: state.editingId || 'draft', type: d.type, defauts: splitLines(d.defauts), notes: d.notes, titre: d.titre, ville: d.ville && d.ville !== 'autre' ? d.ville : '', villeNom: d.ville === 'autre' ? d.villeNom : '', region: d.ville === 'autre' ? d.region : '',
     prix: d.prix, surface: d.surface, dpe: d.dpe, meuble: d.meuble, loyer: d.loyer, charges: d.charges, taxeFonciere: d.taxeFonciere, travaux: d.travaux, annee: d.annee};
 }
 function previewHTML() {
@@ -1016,7 +1098,10 @@ function viewAnalyser() {
       <p class="hint" id="imp-status" role="status"></p>
     </section>` : ''}
     <form id="offer-form" class="card form" novalidate>
-      ${f('titre', 'Titre', {ph: 'T2 lumineux proche gare'})}
+      <div class="field"><span class="lbl">Type de bien</span>
+        <div class="seg seg3" role="radiogroup" aria-label="Type de bien">${Object.entries(TYPES).map(([v, l]) => `<label><input type="radio" name="type" value="${v}" ${(d.type || inferType(d.titre)) === v ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div>
+      </div>
+      ${f('titre', 'Titre', {ph: 'Maison 4 pièces avec jardin'})}
       <div class="field"><label for="f-ville">Ville</label>
         <select id="f-ville" name="ville"><option value="">Choisir une ville…</option>${villes.map(v => `<option value="${esc(v.id)}" ${d.ville === v.id ? 'selected' : ''}>${esc(v.nom)}</option>`).join('')}<option value="autre" ${d.ville === 'autre' ? 'selected' : ''}>Autre ville…</option></select>
       </div>
@@ -1038,6 +1123,7 @@ function viewAnalyser() {
       <div class="grid2">${f('charges', 'Charges de copro / an (€)', {num: 1, ph: 'Ex. 1 200'})}${f('taxeFonciere', 'Taxe foncière / an (€)', {num: 1, ph: 'Ex. 800'})}</div>
       <div class="grid2">${f('travaux', 'Travaux (€)', {num: 1, ph: '0'})}${f('annee', 'Année de construction', {num: 1, ph: 'Ex. 1975'})}</div>
       ${f('lien', 'Lien de l’annonce', {type: 'url', ph: 'https://…'})}
+      <div class="field"><label for="f-defauts">Défauts connus (un par ligne)</label><textarea id="f-defauts" name="defauts" rows="3" placeholder="Toiture à refaire&#10;Humidité au sous-sol&#10;Fosse septique non conforme">${esc(d.defauts)}</textarea><span class="hint">Ce que dit l’annonce ou ce que tu as vu en visite. HomeIme explique chaque défaut et son coût habituel.</span></div>
       <div class="field"><label for="f-notes">Notes</label><textarea id="f-notes" name="notes" rows="3" placeholder="Étage, exposition, impressions de visite…">${esc(d.notes)}</textarea></div>
     </form>
     <section class="card preview" id="preview">${previewHTML()}</section>
@@ -1072,20 +1158,85 @@ function viewMarche() {
     <p class="foot">${esc(M.source || '')} Le rendement brut moyen = loyer annuel ÷ prix d’achat, avant charges et impôts.</p>`;
 }
 
+/* --- Rechercher --- */
+function searchPlace() {
+  const C = state.criteria;
+  if (C.villes && C.villes.length) { const c = state.market.villes.find(v => v.id === C.villes[0]); if (c) return c.nom; }
+  if (C.regions && C.regions.length) return regionName(C.regions[0]);
+  return '';
+}
+function searchLinksHTML() {
+  const C = state.criteria, place = searchPlace();
+  const kind = C.typeBien === 'maison' ? 'maison' : C.typeBien === 'appartement' ? 'appartement' : '';
+  const q = [kind || 'maison ou appartement', 'à vendre', place].filter(Boolean).join(' ') + (C.budgetMax ? ' moins de ' + C.budgetMax + ' €' : '');
+  const g = site => 'https://www.google.com/search?q=' + encodeURIComponent((site ? 'site:' + site + ' ' : '') + q);
+  const p = new URLSearchParams({category: '9'});
+  const txt = [kind, place].filter(Boolean).join(' ');
+  if (txt) p.set('text', txt);
+  if (kind === 'maison') p.set('real_estate_type', '1'); else if (kind === 'appartement') p.set('real_estate_type', '2');
+  if (C.budgetMax) p.set('price', 'min-' + C.budgetMax);
+  if (C.surfaceMin) p.set('square', C.surfaceMin + '-max');
+  const links = [['Leboncoin', 'https://www.leboncoin.fr/recherche?' + p.toString()], ['SeLoger', g('seloger.com')], ['PAP', g('pap.fr')], ['Bien’ici', g('bienici.com')], ['Toutes les annonces', g('')]];
+  return links.map(([l, u]) => `<a class="btn ghost small" href="${esc(u)}" target="_blank" rel="noopener">${esc(l)}</a>`).join('');
+}
+function searchResultsHTML() {
+  if (!state.loaded) return `<div class="card empty"><h3>Chargement…</h3></div>`;
+  const res = analyses().filter(matchesCriteria).sort((a, b) => b.score - a.score);
+  const C = state.criteria;
+  const what = C.typeBien === 'maison' ? 'maison' : C.typeBien === 'appartement' ? 'appartement' : 'bien';
+  return `<div class="section-title"><h2>Résultats dans HomeIme</h2><span class="eyebrow">${res.length} ${what}${res.length > 1 ? 's' : ''}</span></div>
+    ${res.length ? `<div class="list">${res.map(offerCard).join('')}</div>` : `<div class="card empty"><h3>Aucun ${what} ne correspond pour l’instant</h3><p>Élargis la zone ou le budget, ou ouvre une recherche sur un site d’annonces ci-dessous puis colle l’annonce dans « Analyser ».</p></div>`}`;
+}
+function updateSearch() {
+  const a = $('#search-results'); if (a) a.innerHTML = searchResultsHTML();
+  const l = $('#search-links'); if (l) l.innerHTML = searchLinksHTML();
+}
+function viewRechercher() {
+  const C = state.criteria, regs = C.regions || [];
+  const villes = state.market.villes.slice().sort((a, b) => a.nom.localeCompare(b.nom, 'fr'));
+  const cityList = regs.length ? villes.filter(v => regs.includes(cityRegion(v)) || C.villes.includes(v.id)) : villes;
+  const veilleOn = state.mode === 'db';
+  const zoneLabel = regs.length ? regs.map(regionName).join(', ') : C.villes.length ? C.villes.map(id => (villes.find(v => v.id === id) || {}).nom || id).join(', ') : 'Toute la France';
+  const zoneHint = !veilleOn ? 'Les villes choisies passent avant la région.'
+    : regs.length ? 'La veille quotidienne cherche dans les grandes et moyennes villes de cette zone.'
+    : C.villes.length ? 'La veille quotidienne cherche seulement dans ces villes.'
+    : 'Sans zone, la veille cherche dans des villes à fort rendement (Saint-Étienne, Mulhouse, Limoges, Le Havre, Perpignan).';
+  const nIn = (k, label, hint) => `<div class="field"><label for="c-${k}">${label}</label><input id="c-${k}" type="text" inputmode="decimal" data-set="criteria" data-key="${k}" value="${esc(String(C[k] || '').replace('.', ','))}" placeholder="0">${hint ? `<span class="hint">${hint}</span>` : ''}</div>`;
+  const typeSeg = [['maison', 'Maison'], ['appartement', 'Appartement'], ['tous', 'Tous']].map(([v, l]) => `<label><input type="radio" name="typeBien" value="${v}" data-set="criteria" data-key="typeBien" ${(C.typeBien || 'tous') === v ? 'checked' : ''}><span>${l}</span></label>`).join('');
+  return `
+    <div><h1>Rechercher</h1><p class="lead">Choisis ce que tu cherches : chaque bien affiche sa rentabilité possible et ses défauts connus.</p></div>
+    <section class="card form">
+      <div class="field"><span class="lbl">Type de bien</span><div class="seg seg3" role="radiogroup" aria-label="Type de bien">${typeSeg}</div></div>
+      <details class="zone" ${state.zoneOpen ? 'open' : ''}>
+        <summary><span class="lbl">Zone</span><b>${esc(zoneLabel)}</b></summary>
+        <div class="field"><span class="lbl">Régions</span>
+          <div class="toggle-list" role="group" aria-label="Régions de recherche">${REGIONS.map(g => `<button type="button" class="chip" data-action="crit-region" data-region="${g.id}" aria-pressed="${regs.includes(g.id)}">${esc(g.nom)}</button>`).join('')}</div>
+        </div>
+        <div class="field"><span class="lbl">${regs.length ? 'Villes de ta zone (facultatif)' : 'Villes (facultatif)'}</span>
+          ${cityList.length
+            ? `<div class="toggle-list" role="group" aria-label="Villes visées">${cityList.map(v => `<button type="button" class="chip" data-action="crit-city" data-city="${esc(v.id)}" aria-pressed="${C.villes.includes(v.id)}">${esc(v.nom)}</button>`).join('')}</div>`
+            : `<span class="hint">Pas de ville de référence dans cette zone : toutes ses villes comptent.</span>`}
+          <span class="hint">${esc(zoneHint)}</span>
+        </div>
+      </details>
+      <div class="grid2">${nIn('budgetMax', 'Budget max (€)')}${nIn('surfaceMin', 'Surface min (m²)')}</div>
+      ${nIn('rendementMin', 'Rendement brut minimum (%)', 'Loyer annuel ÷ prix. 6 à 8 % est un bon objectif.')}
+    </section>
+    <div id="search-results" style="display:flex;flex-direction:column;gap:12px">${searchResultsHTML()}</div>
+    <section class="card">
+      <h2>Chercher sur les sites d’annonces</h2>
+      <p class="lead">Ouvre une recherche déjà filtrée. Quand une annonce te plaît, copie son texte${state.aiAvailable ? ' ou fais une capture' : ''} et colle-la dans « Analyser » : HomeIme calcule sa rentabilité et repère ses défauts.</p>
+      <div class="row" id="search-links">${searchLinksHTML()}</div>
+      <a class="btn" href="#analyser">Analyser une annonce</a>
+    </section>
+    ${veilleOn ? `<section class="card"><h2>Recherche automatique</h2><p class="lead">Chaque matin, Claude cherche de vraies annonces avec ces critères et les ajoute ici avec l’étiquette « Nouveau ».</p>${veilleLine()}</section>` : ''}`;
+}
+
 function viewReglages() {
   const S = state.settings, C = state.criteria;
   const nIn = (k, label, hint, obj = 'settings') => `<div class="field"><label for="s-${k}">${label}</label><input id="s-${k}" type="text" inputmode="decimal" data-set="${obj}" data-key="${k}" value="${esc(String((obj === 'settings' ? S : C)[k]).replace('.', ','))}">${hint ? `<span class="hint">${hint}</span>` : ''}</div>`;
   const sel = (k, label, opts) => `<div class="field"><label for="s-${k}">${label}</label><select id="s-${k}" data-set="settings" data-key="${k}">${opts.map(([v, l]) => `<option value="${v}" ${String(S[k]) === String(v) ? 'selected' : ''}>${l}</option>`).join('')}</select></div>`;
-  const villes = state.market.villes.slice().sort((a, b) => a.nom.localeCompare(b.nom, 'fr'));
-  const regs = C.regions || [];
-  const cityList = regs.length ? villes.filter(v => regs.includes(cityRegion(v)) || C.villes.includes(v.id)) : villes;
   const veilleOn = state.mode === 'db';
-  const zoneHint = !veilleOn
-    ? (regs.length ? 'Zone choisie : ' + regs.map(regionName).join(', ') + '.' : 'Aucune région choisie : toutes les villes comptent.')
-    : regs.length
-    ? 'Zone choisie : ' + regs.map(regionName).join(', ') + '. La veille cherche dans les grandes et moyennes villes de cette zone.'
-    : C.villes.length ? 'Pas de région choisie : la veille cherche seulement dans les villes sélectionnées plus bas.'
-    : 'Aucune zone choisie : la veille cherche dans des villes à fort rendement (Saint-Étienne, Mulhouse, Limoges, Le Havre, Perpignan).';
   return `
     <div><h1>Réglages</h1><p class="lead">Tes hypothèses s’appliquent à toutes les offres.</p></div>
     <section class="card form">
@@ -1110,19 +1261,10 @@ function viewReglages() {
       <h2>Ma capacité d’emprunt</h2>
       <div class="grid2">${nIn('revenus', 'Revenus nets / mois (€)', '0 = non calculé')}${nIn('autresCredits', 'Autres crédits / mois (€)')}</div>
     </section>
-    <section class="card form">
-      <h2>Mes critères de recherche</h2>
-      <p class="lead">${veilleOn ? 'La veille quotidienne cherche les nouvelles offres dans cette zone, et l’app marque « Tes critères » sur celles qui correspondent.' : 'L’app marque « Tes critères » sur les offres qui correspondent à ta zone, ton budget et ton rendement minimum.'}</p>
-      <div class="field"><span class="lbl">Région de recherche</span>
-        <div class="toggle-list" role="group" aria-label="Régions de recherche">${REGIONS.map(g => `<button type="button" class="chip" data-action="crit-region" data-region="${g.id}" aria-pressed="${regs.includes(g.id)}">${esc(g.nom)}</button>`).join('')}</div>
-        <span class="hint">${esc(zoneHint)}</span>
-      </div>
-      <div class="field"><span class="lbl">${regs.length ? 'Villes précises dans ta zone (facultatif)' : 'Villes précises (facultatif)'}</span>
-        ${cityList.length
-          ? `<div class="toggle-list" role="group" aria-label="Villes visées">${cityList.map(v => `<button type="button" class="chip" data-action="crit-city" data-city="${esc(v.id)}" aria-pressed="${C.villes.includes(v.id)}">${esc(v.nom)}</button>`).join('')}</div>`
-          : `<span class="hint">Pas de ville de référence dans cette zone : la veille cherchera dans toutes ses villes.</span>`}
-      </div>
-      <div class="grid2">${nIn('budgetMax', 'Budget max (€)', '', 'criteria')}${nIn('rendementMin', 'Rendement brut min (%)', '', 'criteria')}</div>
+    <section class="card">
+      <h2>Ma recherche</h2>
+      <p class="lead">Le type de bien (maison ou appartement), la zone, le budget et le rendement minimum se règlent dans l’onglet Rechercher.</p>
+      <a class="btn ghost" href="#rechercher">Ouvrir Rechercher</a>
     </section>
     <section class="card">
       <h2>Installer HomeIme sur ton iPhone</h2>
@@ -1157,15 +1299,15 @@ function render(opts = {}) {
   renderStatus();
   const view = $('#view'), ae = document.activeElement;
   const typing = ae && view.contains(ae) && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName) && ae.type !== 'checkbox' && ae.type !== 'radio';
-  if (typing && !opts.force) { if (state.route.view === 'analyser') { const p = $('#preview'); if (p) p.innerHTML = previewHTML(); } return; }
+  if (typing && !opts.force) { if (state.route.view === 'analyser') { const p = $('#preview'); if (p) p.innerHTML = previewHTML(); } else if (state.route.view === 'rechercher') updateSearch(); return; }
   setTabs();
   const v = state.route.view;
-  view.innerHTML = v === 'detail' ? viewDetail(state.route.id) : v === 'analyser' ? viewAnalyser() : v === 'marche' ? viewMarche() : v === 'reglages' ? viewReglages() : viewOffres();
+  view.innerHTML = v === 'detail' ? viewDetail(state.route.id) : v === 'rechercher' ? viewRechercher() : v === 'analyser' ? viewAnalyser() : v === 'marche' ? viewMarche() : v === 'reglages' ? viewReglages() : viewOffres();
 }
 function route() {
   const h = decodeURIComponent(location.hash.slice(1));
   if (h.indexOf('o-') === 0) state.route = {view: 'detail', id: h.slice(2)};
-  else if (['offres', 'analyser', 'marche', 'reglages'].includes(h)) state.route = {view: h, id: null};
+  else if (['offres', 'rechercher', 'analyser', 'marche', 'reglages'].includes(h)) state.route = {view: h, id: null};
   else state.route = {view: 'offres', id: null};
   state.confirm = null;
 }
@@ -1198,7 +1340,7 @@ async function importListing() {
   btn.disabled = true; status.textContent = 'Claude lit l’annonce…';
   const villes = state.market.villes.map(v => v.nom).join(', ');
   const prompt = `Tu lis une annonce immobilière française (texte et/ou capture d'écran). Extrais les informations et réponds uniquement avec un objet JSON de cette forme :
-{"titre": "titre court, 2 à 6 mots, ex. T2 lumineux proche gare", "ville": "nom de la commune", "prix": nombre en euros, "surface": nombre en m², "pieces": nombre, "dpe": "A" à "G" ou null, "meuble": true ou false, "loyer": loyer mensuel hors charges si le bien est vendu loué ou si un loyer est indiqué, sinon null, "charges": charges de copropriété ANNUELLES en euros ou null, "taxeFonciere": taxe foncière annuelle ou null, "travaux": montant de travaux annoncé ou null, "annee": année de construction ou null, "lien": URL de l'annonce si présente ou null}
+{"type": "maison", "appartement" ou "immeuble", "titre": "titre court, 2 à 6 mots, ex. Maison 4 pièces avec jardin", "defauts": liste de défauts ou travaux mentionnés dans l'annonce, en quelques mots chacun (ex. ["toiture à refaire", "humidité au sous-sol", "chauffage au fioul"]), [] si aucun, "ville": "nom de la commune", "prix": nombre en euros, "surface": nombre en m², "pieces": nombre, "dpe": "A" à "G" ou null, "meuble": true ou false, "loyer": loyer mensuel hors charges si le bien est vendu loué ou si un loyer est indiqué, sinon null, "charges": charges de copropriété ANNUELLES en euros ou null, "taxeFonciere": taxe foncière annuelle ou null, "travaux": montant de travaux annoncé ou null, "annee": année de construction ou null, "lien": URL de l'annonce si présente ou null}
 Mets null quand l'information n'est pas dans l'annonce : ne devine pas. Si les charges sont mensuelles, multiplie-les par 12. Villes connues de l'application : ${villes}.
 ${txt.trim() ? 'Annonce :\n' + txt.trim().slice(0, 12000) : "L'annonce est dans la capture d'écran jointe."}`;
   try {
@@ -1210,6 +1352,8 @@ ${txt.trim() ? 'Annonce :\n' + txt.trim().slice(0, 12000) : "L'annonce est dans 
     const setN = k => { const n = num(j[k]); if (n != null && n >= 0) d[k] = String(n); };
     ['prix', 'surface', 'pieces', 'loyer', 'charges', 'taxeFonciere', 'travaux', 'annee'].forEach(setN);
     if (typeof j.titre === 'string') d.titre = j.titre.slice(0, 80);
+    d.type = typeof j.type === 'string' && TYPES[j.type.trim().toLowerCase()] ? j.type.trim().toLowerCase() : inferType(d.titre);
+    if (Array.isArray(j.defauts)) d.defauts = j.defauts.filter(x => typeof x === 'string' && x.trim()).slice(0, 12).map(x => x.trim().slice(0, 120)).join('\n');
     if (typeof j.dpe === 'string' && /^[A-G]$/i.test(j.dpe.trim())) d.dpe = j.dpe.trim().toUpperCase();
     d.meuble = j.meuble === true;
     if (typeof j.lien === 'string' && safeUrl(j.lien)) d.lien = safeUrl(j.lien);
@@ -1234,7 +1378,8 @@ async function askClaude(id) {
   const r = analyze(raw, state.settings, state.market), o = r.o;
   state.ai[id] = {status: 'loading', text: ''}; render({force: true});
   const data = {
-    titre: o.titre, ville: cityName(r), prix: o.prix, surface: o.surface, dpe: o.dpe || 'inconnu', location: o.meuble ? 'meublée' : 'nue',
+    typeDeBien: TYPES[o.type], titre: o.titre, ville: cityName(r), prix: o.prix, surface: o.surface, dpe: o.dpe || 'inconnu', location: o.meuble ? 'meublée' : 'nue',
+    defautsConnus: r.defauts.map(x => x.titre),
     loyerMensuel: o.loyer, valeursEstimees: o.estimes, chargesCoproAn: o.charges, taxeFonciere: o.taxeFonciere, travaux: o.travaux, anneeConstruction: o.annee,
     prixM2: Math.round(r.prixM2), prixM2MoyenVille: r.city ? r.city.prixM2 : null, encadrementLoyers: r.city ? r.city.encadrement : null,
     apport: r.apport, emprunt: Math.round(r.emprunt), tauxCredit: state.settings.taux, dureeAns: state.settings.duree,
@@ -1312,6 +1457,7 @@ document.addEventListener('click', async e => {
       prix, surface, pieces: num(d.pieces), dpe: d.dpe || null, meuble: !!d.meuble,
       loyer: num(d.loyer), charges: num(d.charges), taxeFonciere: num(d.taxeFonciere), travaux: num(d.travaux), annee: num(d.annee),
       lien: safeUrl(d.lien), notes: (d.notes || '').slice(0, 4000),
+      type: TYPES[d.type] ? d.type : inferType(d.titre), defauts: splitLines(d.defauts),
       checks: prevO && prevO.checks ? prevO.checks : [], exemple: false,
       source: prevO && prevO.source ? prevO.source : 'manuel',
       createdAt: prevO && prevO.createdAt ? prevO.createdAt : new Date().toISOString()
@@ -1358,6 +1504,7 @@ function onFormInput(e) {
   const t = e.target;
   if (!t.form || t.form.id !== 'offer-form' || !t.name) return;
   const d = ensureDraft();
+  if (t.type === 'radio' && e.type === 'input') return; // un choix est pris en compte à la validation
   if (t.name === 'meuble') d.meuble = t.value === '1';
   else d[t.name] = t.value;
   if (t.name === 'ville') { const box = $('#ville-autre'); if (box) box.hidden = t.value !== 'autre'; }
@@ -1368,15 +1515,18 @@ function onFormInput(e) {
 function onSettingInput(e, committed) {
   const t = e.target;
   if (!t.dataset || !t.dataset.set) return;
-  const isSel = t.tagName === 'SELECT';
-  if (isSel && !committed) return; // un menu est enregistré à la validation
+  const isSel = t.tagName === 'SELECT', isRadio = t.type === 'radio';
+  if ((isSel || isRadio) && !committed) return; // un menu ou un choix est enregistré à la validation
   const k = t.dataset.key, obj = t.dataset.set;
-  let v = isSel ? (isNaN(Number(t.value)) ? t.value : Number(t.value)) : num(t.value);
+  let v = isRadio ? t.value : isSel ? (isNaN(Number(t.value)) ? t.value : Number(t.value)) : num(t.value);
+  if (v == null && obj === 'criteria' && String(t.value).trim() === '') v = 0;
   if (v == null) return;
   if (obj === 'settings') state.settings = Object.assign({}, state.settings, {[k]: v});
   else state.criteria = Object.assign({}, state.criteria, {[k]: v});
   queueSave(obj);
+  if (obj === 'criteria' && state.route.view === 'rechercher') updateSearch();
 }
+document.addEventListener('toggle', e => { if (e.target.classList && e.target.classList.contains('zone')) state.zoneOpen = e.target.open; }, true);
 
 window.addEventListener('hashchange', () => { route(); render({force: true}); window.scrollTo(0, 0); });
 route();
